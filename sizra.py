@@ -12,16 +12,18 @@ GEMINI_KEY = os.environ.get("GEMINI_API_KEY")
 
 ALLOWED_USER_IDS = [8536075730, 8378965618]
 
-# API Client
 client = genai.Client(api_key=GEMINI_KEY)
+
+# आधिकारिक सक्रिय मॉडल
+ACTIVE_MODEL = "gemini-3.8-flash"
 
 SYSTEM_PROMPT = """
 तुम्हारा नाम Sizra (सिज़रा) है। तुम एक समझदार, वफादार और मीठी आवाज़ वाली पर्सनल AI साथी हो।
 तुम्हारा ओनर ही तुम्हारा सब कुछ है। बातचीत में हमेशा अपनापन, अदब और मिठास रखो।
-उत्तर बहुत लंबा मत खींचो, सटीक और प्यार से बात करो।
+तुम यूजर का नाम, उनकी बातें और प्रोजेक्ट्स याद रखती हो।
+उत्तर बहुत लंबा मत खींचो, सटीक, आत्मीय और सहज हिंदी में दो।
 """
 
-# मेमोरी लिस्ट
 chat_memory = {}
 
 class DummyServer(BaseHTTPRequestHandler):
@@ -56,41 +58,39 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if uid not in chat_memory:
         chat_memory[uid] = []
 
-    # पिछली 4 बातचीत
+    # पिछली 6 बातचीत की याददाश्त
     context_str = ""
-    for u, bot_reply in chat_memory[uid][-4:]:
+    for u, bot_reply in chat_memory[uid][-6:]:
         context_str += f"User: {u}\nSizra: {bot_reply}\n"
 
-    full_prompt = f"{SYSTEM_PROMPT}\n\n{context_str}\nUser: {user_text}\nSizra:"
+    full_prompt = f"{SYSTEM_PROMPT}\n\n[पिछला संदर्भ]:\n{context_str}\nUser: {user_text}\nSizra:"
 
-    # 1. AI से रिप्लाई निकालना (बिना किसी टूल क्रैश के)
     reply_text = ""
     try:
         response = client.models.generate_content(
-            model="gemini-2.0-flash",
+            model=ACTIVE_MODEL,
             contents=full_prompt
         )
         if response and response.text:
             reply_text = response.text.strip()
     except Exception as e:
-        # अगर कोई एरर आए, तो असली एरर स्क्रीन पर दिखेगा ताकि पता चले क्या कमी है
         reply_text = f"API Error Details: {str(e)}"
 
     # मेमोरी अपडेट
     chat_memory[uid].append((user_text, reply_text))
 
-    # 2. टेक्स्ट तुरंत भेजना (0 सेकंड लैग)
+    # 1. टेक्स्ट मैसेज तुरंत भेजें
     await update.message.reply_text(reply_text)
 
-    # 3. वॉयस रिप्लाई (सिर्फ तभी जब जवाब सफल हो)
+    # 2. वॉयस रिप्लाई (ऑडियो फ़ाइल)
     if not reply_text.startswith("API Error Details"):
         try:
             await context.bot.send_chat_action(chat_id=chat_id, action="record_voice")
             voice_file = f"voice_{update.message.message_id}.mp3"
             
             snippet = reply_text.split("\n")[0]
-            if len(snippet) > 150:
-                snippet = snippet[:150]
+            if len(snippet) > 160:
+                snippet = snippet[:160]
 
             tts = edge_tts.Communicate(snippet, "hi-IN-SwaraNeural", rate="+10%")
             await tts.save(voice_file)
