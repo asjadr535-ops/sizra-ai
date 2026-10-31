@@ -12,7 +12,7 @@ GROQ_KEY = os.environ.get("GROQ_API_KEY")
 
 ALLOWED_USER_IDS = [8536075730, 8378965618]
 
-# Groq Client (Superfast 300+ tokens/sec)
+# Groq Client
 groq_client = Groq(api_key=GROQ_KEY)
 
 SYSTEM_PROMPT = """
@@ -42,7 +42,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("माफ़ कीजिए, मैं केवल अपने ओनर के लिए समर्पित हूँ।")
         return
     chat_memory[uid] = []
-    await update.message.reply_text("नमस्ते जी! मैं आपकी सिज़रा हाज़िर हूँ। अब मैं सुपरफास्ट स्पीड से आपकी मदद के लिए तैयार हूँ। बताइए आज क्या हुक्म है?")
+    await update.message.reply_text("नमस्ते जी! मैं आपकी सिज़रा हाज़िर हूँ। अब मैं पूरी ताज़गी और तेज़ रफ़्तार के साथ तैयार हूँ। बताइए आज क्या बात करने वाले हैं?")
 
 async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
@@ -66,10 +66,10 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     reply_text = ""
     try:
-        # Llama 3.3 70B Versatile on Groq (Instant Speed)
+        # Verified & Active Model on Groq
         chat_completion = groq_client.chat.completions.create(
             messages=messages,
-            model="llama-3.3-70b-versatile",
+            model="llama-3.1-70b-versatile",
             temperature=0.7,
             max_tokens=800
         )
@@ -79,10 +79,10 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     chat_memory[uid].append((user_text, reply_text))
 
-    # 1. टेक्स्ट तुरंत भेजें (आधे सेकंड में रिप्लाई)
+    # 1. तुरंत टेक्स्ट भेजें
     await update.message.reply_text(reply_text)
 
-    # 2. मीठी आवाज़ (Fast TTS)
+    # 2. मीठी आवाज़ में ऑडियो
     if not reply_text.startswith("Groq API Error"):
         try:
             await context.bot.send_chat_action(chat_id=chat_id, action="record_voice")
