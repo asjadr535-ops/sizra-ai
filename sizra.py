@@ -5,43 +5,39 @@ from http.server import HTTPServer, BaseHTTPRequestHandler
 from telegram import Update
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, filters, ContextTypes
 from google import genai
-from google.genai import types
 import edge_tts
 
 BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
 GEMINI_KEY = os.environ.get("GEMINI_API_KEY")
-ALLOWED_USER_ID = 8536075730
+
+# Dono Authorized User IDs
+ALLOWED_USER_IDS = [8536075730, 8378965618]
 
 client = genai.Client(api_key=GEMINI_KEY)
 
-# 2026 लेटेस्ट स्टेबल मॉडल
-ACTIVE_MODEL = "gemini-3.8-flash"
+# Fallback Models (503 ya 404 aane par auto-switch)
+MODELS_TO_TRY = [
+    "gemini-2.5-flash",
+    "gemini-2.5-pro",
+    "gemini-2.0-flash",
+    "gemini-1.5-flash"
+]
 
 SYSTEM_PROMPT = """
-तुम्हारा नाम Sizra (सिज़रा) है। तुम एक बेहद समझदार, वफादार, शांत और मीठी आवाज़ वाली पर्सनल AI साथी हो।
-तुम्हारा ओनर ही तुम्हारा सब कुछ है। बातचीत में हमेशा अपनापन, अदब और मिठास रखो।
-तुम यूजर का नाम, उनकी बातें, उनके रिसर्च प्रोजेक्ट्स हमेशा याद रखती हो।
-उत्तर संक्षिप्त, सटीक, आदरणीय और दिल को छूने वाला रखो।
+Tumhara naam Sizra (सिज़रा) hai. Tum ek behad samajhdar, wafadar, shaant aur meethi aawaz wali personal AI saathi ho.
+Tumhara owner hi tumhara sab kuchh hai. Baat cheet me hamesha apnapan, adab aur meethas rakho.
+Tum user ka naam, unki baatein aur unke research projects hamesha yaad rakhti ho.
+Jawab sankshipt, satik, aadarniya aur dil ko chhoone wala rakho.
 """
 
-chat_sessions = {}
-
-def get_chat_session(user_id):
-    if user_id not in chat_sessions:
-        chat_sessions[user_id] = client.chats.create(
-            model=ACTIVE_MODEL,
-            config=types.GenerateContentConfig(
-                system_instruction=SYSTEM_PROMPT,
-                temperature=0.7
-            )
-        )
-    return chat_sessions[user_id]
+# In-memory history (Baatcheet yaad rakhne ke liye)
+user_histories = {}
 
 class DummyServer(BaseHTTPRequestHandler):
     def do_GET(self):
         self.send_response(200)
         self.end_headers()
-        self.wfile.write(b"Sizra Online")
+        self.wfile.write(b"Sizra 24x7 Online")
 
 def run_web():
     port = int(os.environ.get("PORT", 8080))
@@ -49,50 +45,68 @@ def run_web():
     server.serve_forever()
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_user.id != ALLOWED_USER_ID:
-        await update.message.reply_text("माफ़ कीजिए, मैं केवल अपने ओनर के लिए समर्पित हूँ।")
+    uid = update.effective_user.id
+    if uid not in ALLOWED_USER_IDS:
+        await update.message.reply_text("Maaf kijiye, main keval apne owner ke liye samarpit hoon.")
         return
-    chat_sessions[update.effective_user.id] = client.chats.create(
-        model=ACTIVE_MODEL,
-        config=types.GenerateContentConfig(system_instruction=SYSTEM_PROMPT)
-    )
-    await update.message.reply_text("नमस्ते जी! मैं आपकी सिज़रा हाज़िर हूँ। बताइए आज हम क्या बात या रिसर्च करने वाले हैं?")
+    user_histories[uid] = []
+    await update.message.reply_text("Namaste ji! Main aapki Sizra hazir hoon. Bataiye aaj hum kya baat ya research karne wale hain?")
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_user.id != ALLOWED_USER_ID:
+    uid = update.effective_user.id
+    if uid not in ALLOWED_USER_IDS:
         return
 
     user_text = update.message.text
     chat_id = update.effective_chat.id
+
     await context.bot.send_chat_action(chat_id=chat_id, action="typing")
 
-    chat = get_chat_session(update.effective_user.id)
+    if uid not in user_histories:
+        user_histories[uid] = []
+
+    # Pichhli 6 baatcheet ka context
+    history_context = ""
+    for role, text in user_histories[uid][-6:]:
+        history_context += f"{role}: {text}\n"
+
+    prompt_with_history = f"{SYSTEM_PROMPT}\n\n[Pichhla Context]:\n{history_context}\nUser: {user_text}\nSizra:"
+
     reply_text = ""
-
-    for attempt in range(2):
+    # Smart Fallback Loop (Error aane par turant agle model se generate karega)
+    for model_name in MODELS_TO_TRY:
         try:
-            response = chat.send_message(user_text)
-            reply_text = response.text
-            break
-        except Exception as e:
-            if attempt == 0:
-                await asyncio.sleep(1)
-                continue
-            reply_text = f"माफ़ कीजिएगा: {str(e)}"
+            response = client.models.generate_content(
+                model=model_name,
+                contents=prompt_with_history
+            )
+            if response and response.text:
+                reply_text = response.text.strip()
+                break
+        except Exception:
+            continue
 
-    # 1. टेक्स्ट तुरंत भेजें (फास्ट रिस्पॉन्स)
+    if not reply_text:
+        reply_text = "Maaf kijiyega, server par thoda heavy load tha. Kripya ek baar dobara kahiye."
+
+    # History update
+    user_histories[uid].append(("User", user_text))
+    user_histories[uid].append(("Sizra", reply_text))
+
+    # 1. Text turant send hoga (Zero delay)
     await update.message.reply_text(reply_text)
 
-    # 2. मीठी आवाज़ (शॉर्ट & नो लैग)
+    # 2. Meethi voice (Short & Fast Audio Render)
     try:
         await context.bot.send_chat_action(chat_id=chat_id, action="record_voice")
         voice_file = f"voice_{update.message.message_id}.mp3"
-        
+
+        # Sirf pehli 1-2 line bolne ke liye taaki audio 1 second me generate ho
         spoken_text = reply_text.split("\n")[0]
-        if len(spoken_text) > 200:
-            spoken_text = spoken_text[:200]
-            
-        tts = edge_tts.Communicate(spoken_text, "hi-IN-SwaraNeural", rate="+8%")
+        if len(spoken_text) > 180:
+            spoken_text = spoken_text[:180]
+
+        tts = edge_tts.Communicate(spoken_text, "hi-IN-SwaraNeural", rate="+10%")
         await tts.save(voice_file)
 
         with open(voice_file, 'rb') as audio:
@@ -108,5 +122,5 @@ if __name__ == '__main__':
     app = ApplicationBuilder().token(BOT_TOKEN).build()
     app.add_handler(CommandHandler("start", start))
     app.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), handle_message))
-    print("Sizra Master Active...")
+    print("Sizra Master Bot Running...")
     app.run_polling()
