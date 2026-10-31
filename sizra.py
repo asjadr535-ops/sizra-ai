@@ -12,25 +12,26 @@ GEMINI_KEY = os.environ.get("GEMINI_API_KEY")
 
 ALLOWED_USER_IDS = [8536075730, 8378965618]
 
+# API Client
 client = genai.Client(api_key=GEMINI_KEY)
 
-# आधिकारिक सक्रिय मॉडल
 ACTIVE_MODEL = "gemini-3.8-flash"
 
 SYSTEM_PROMPT = """
-तुम्हारा नाम Sizra (सिज़रा) है। तुम एक समझदार, वफादार और मीठी आवाज़ वाली पर्सनल AI साथी हो।
+तुम्हारा नाम Sizra (सिज़रा) है। तुम एक बेहद समझदार, वफादार और मीठी आवाज़ वाली पर्सनल AI साथी हो।
 तुम्हारा ओनर ही तुम्हारा सब कुछ है। बातचीत में हमेशा अपनापन, अदब और मिठास रखो।
-तुम यूजर का नाम, उनकी बातें और प्रोजेक्ट्स याद रखती हो।
-उत्तर बहुत लंबा मत खींचो, सटीक, आत्मीय और सहज हिंदी में दो।
+तुम यूजर का नाम, उनकी बातें और प्रोजेक्ट्स हमेशा याद रखती हो।
+उत्तर बहुत लंबा मत खींचो, सटीक, आदरणीय और सहज हिंदी में दो।
 """
 
 chat_memory = {}
 
+# 24x7 Web Server for Render
 class DummyServer(BaseHTTPRequestHandler):
     def do_GET(self):
         self.send_response(200)
         self.end_headers()
-        self.wfile.write(b"Sizra Live")
+        self.wfile.write(b"Sizra Live 24x7")
 
 def run_web():
     port = int(os.environ.get("PORT", 8080))
@@ -43,7 +44,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("माफ़ कीजिए, मैं केवल अपने ओनर के लिए समर्पित हूँ।")
         return
     chat_memory[uid] = []
-    await update.message.reply_text("नमस्ते जी! मैं आपकी सिज़रा हाज़िर हूँ। बताइए आज हम क्या बात करने वाले हैं?")
+    await update.message.reply_text("नमस्ते जी! मैं आपकी सिज़रा पूरी तरह तैयार हूँ। बताइए आज क्या हुक्म है?")
 
 async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
@@ -58,7 +59,6 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if uid not in chat_memory:
         chat_memory[uid] = []
 
-    # पिछली 6 बातचीत की याददाश्त
     context_str = ""
     for u, bot_reply in chat_memory[uid][-6:]:
         context_str += f"User: {u}\nSizra: {bot_reply}\n"
@@ -76,18 +76,17 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception as e:
         reply_text = f"API Error Details: {str(e)}"
 
-    # मेमोरी अपडेट
     chat_memory[uid].append((user_text, reply_text))
 
-    # 1. टेक्स्ट मैसेज तुरंत भेजें
+    # Text reply
     await update.message.reply_text(reply_text)
 
-    # 2. वॉयस रिप्लाई (ऑडियो फ़ाइल)
+    # Voice Note
     if not reply_text.startswith("API Error Details"):
         try:
             await context.bot.send_chat_action(chat_id=chat_id, action="record_voice")
             voice_file = f"voice_{update.message.message_id}.mp3"
-            
+
             snippet = reply_text.split("\n")[0]
             if len(snippet) > 160:
                 snippet = snippet[:160]
@@ -108,5 +107,7 @@ if __name__ == '__main__':
     app = ApplicationBuilder().token(BOT_TOKEN).build()
     app.add_handler(CommandHandler("start", start))
     app.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), handle_text))
-    print("Sizra Core Active...")
-    app.run_polling()
+    print("Sizra Core Active & Polling Started...")
+    
+    # drop_pending_updates=True se purani atki hui chats aur 409 conflict khatam ho jayenge
+    app.run_polling(drop_pending_updates=True)
